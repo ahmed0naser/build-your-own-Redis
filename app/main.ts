@@ -8,9 +8,6 @@ console.log("Logs from your program will appear here!");
 const server: net.Server = net.createServer((connection: net.Socket) => {
   // Handle connection
   connection.on("data", (data: Buffer) => {
-    if (data.toString() === "+PING\r\n") {
-      connection.write("+PONG\r\n");
-    }
     let buffer;
 
     let value;
@@ -31,8 +28,9 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
     // commands are arrays of strings: ["ECHO", "hello"]
     if (Array.isArray(value)) {
       const [name, ...args] = value;
-
-      if (typeof name === "string" && name.toUpperCase() === "ECHO") {
+      if (typeof name === "string" && name.toUpperCase() === "PING") {
+        connection.write("PONG\r\n");
+      } else if (typeof name === "string" && name.toUpperCase() === "ECHO") {
         const message = String(args[0] ?? "");
 
         // Reply must be a bulk string, length counted in bytes.
