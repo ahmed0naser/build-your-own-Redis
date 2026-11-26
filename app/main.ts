@@ -45,16 +45,44 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         if (args.length < 2) {
           connection.write(err("wrong number of arguments for 'set' command"));
         } else {
-          store.set(args[0], { value: args[1], expiresAt: null });
-          connection.write(simple("OK"));
+          if (args.length === 2) {
+            store.set(args[0], { value: args[1], expiresAt: null });
+            connection.write(simple("OK"));
+          } else {
+            const ms = parseInt(args[3], 10);
+            if (
+              args.length === 4 &&
+              args[2].toLowerCase() === "px" &&
+              !Number.isNaN(ms) &&
+              ms > 0
+            ) {
+              store.set(args[0], {
+                value: args[1],
+                expiresAt: Date.now() + ms,
+              });
+              connection.write(simple("OK"));
+            } else {
+              connection.write(err("syntax error"));
+            }
+          }
         }
       } else if (cmd === "get") {
         if (args.length !== 1)
           connection.write(err("wrong number of arguments for 'get' command"));
         else {
-          const res = store.get(args[0])?.value;
-          if (res === undefined) connection.write(nullBulkStr());
-          else connection.write(bulk(res));
+          const res = store.get(args[0]);
+          if (
+            res !== undefined &&
+            res.expiresAt !== null &&
+            res.expiresAt <= Date.now()
+          ) {
+            store.delete(args[0]); // expired: remove it, then treat as missing
+            connection.write(nullBulkStr());
+          } else if (res === undefined) {
+            connection.write(nullBulkStr());
+          } else {
+            connection.write(bulk(res.value));
+          }
         }
       }
       //
