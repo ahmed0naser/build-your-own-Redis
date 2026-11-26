@@ -1,33 +1,65 @@
 import * as net from "net";
-import { parse, bulk, simple, err } from "./parser";
+import { parse, bulk, simple, err, nullBulkStr } from "./resp";
 
 // You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
 
 // Uncomment the code below to pass the first stage
+type Entry = { value: string; expiresAt: number | null };
+const store = new Map<string, Entry>();
 const server: net.Server = net.createServer((connection: net.Socket) => {
   // Handle connection
   let buffer = Buffer.alloc(0);
   connection.on("data", (data: Buffer) => {
     buffer = Buffer.concat([buffer, data]);
     while (true) {
+      let result;
       try {
-        const result = parse(buffer);
-        if (!result) break;
+        result = parse(buffer);
+      } catch {
+        connection.write(err("Protocol error"));
+        connection.end();
+        buffer = Buffer.alloc(0);
+        return;
+      }
+      if (!result) break;
 
-        buffer = buffer.subarray(result.next);
+      buffer = buffer.subarray(result.next);
+      const command = result.value;
+      if (!Array.isArray(command) || typeof command[0] !== "string") {
+        connection.write(err("invalid command format"));
+        continue;
+      }
+      const [name, ...args] = command as string[];
 
-        const [name, ...args] = result.value as string[];
-        const cmd = name.toLowerCase();
-        if (cmd === "ping") {
-          connection.write(simple("PONG"));
-        } else if (cmd === "echo") {
-          connection.write(bulk(args[0]));
+      const cmd = name.toLowerCase();
+      if (cmd === "ping") {
+        connection.write(simple("PONG"));
+      } else if (cmd === "echo") {
+        if (args.length !== 1) {
+          connection.write(err("wrong number of arguments for 'echo' command"));
         } else {
-          connection.write(err(`ERR unknown command ${name}`));
+          connection.write(bulk(args[0]));
         }
-      } catch (e) {
-        connection.write(err(`ERR unknown type`));
+      } else if (cmd === "set") {
+        if (args.length < 2) {
+          connection.write(err("wrong number of arguments for 'set' command"));
+        } else {
+          store.set(args[0], { value: args[1], expiresAt: null });
+          connection.write(simple("OK"));
+        }
+      } else if (cmd === "get") {
+        if (args.length !== 1)
+          connection.write(err("wrong number of arguments for 'get' command"));
+        else {
+          const res = store.get(args[0])?.value;
+          if (res === undefined) connection.write(nullBulkStr());
+          else connection.write(bulk(res));
+        }
+      }
+      //
+      else {
+        connection.write(err(`unknown command '${name}'`));
       }
     }
   });
