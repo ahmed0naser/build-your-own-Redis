@@ -1,5 +1,5 @@
 import * as net from "net";
-import { parse } from "./parser";
+import { parse, bulk, simple, err } from "./parser";
 
 // You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
@@ -7,41 +7,27 @@ console.log("Logs from your program will appear here!");
 // Uncomment the code below to pass the first stage
 const server: net.Server = net.createServer((connection: net.Socket) => {
   // Handle connection
+  let buffer = Buffer.alloc(0);
   connection.on("data", (data: Buffer) => {
-    let buffer;
+    buffer = Buffer.concat([buffer, data]);
+    while (true) {
+      try {
+        const result = parse(buffer);
+        if (!result) break;
 
-    let value;
-    try {
-      value = parse(data);
-    } catch (error) {
-      connection.write("-ERR Protocol error\r\n");
-      buffer = Buffer.alloc(0);
-      return;
-    }
+        buffer = buffer.subarray(result.next);
 
-    if (value === undefined) {
-      return; // incomplete, wait for the next chunk
-    }
-
-    buffer = Buffer.alloc(0); // command fully parsed
-
-    // commands are arrays of strings: ["ECHO", "hello"]
-    if (Array.isArray(value)) {
-      const [name, ...args] = value;
-      if (typeof name === "string" && name.toUpperCase() === "PING") {
-        connection.write("+PONG\r\n");
-      } else if (typeof name === "string" && name.toUpperCase() === "ECHO") {
-        const message = String(args[0] ?? "");
-
-        // Reply must be a bulk string, length counted in bytes.
-        const payload = Buffer.from(message);
-        connection.write(
-          Buffer.concat([
-            Buffer.from(`$${payload.length}\r\n`),
-            payload,
-            Buffer.from("\r\n"),
-          ]),
-        );
+        const [name, ...args] = result.value as string[];
+        const cmd = name.toLowerCase();
+        if (cmd === "ping") {
+          connection.write(simple("PONG"));
+        } else if (cmd === "echo") {
+          connection.write(bulk(args[0]));
+        } else {
+          connection.write(err(`ERR unknown command ${name}`));
+        }
+      } catch (e) {
+        connection.write(err(`ERR unknown type`));
       }
     }
   });
